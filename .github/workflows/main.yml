@@ -2,22 +2,22 @@ name: Contact Form Biweekly Test
 
 on:
   schedule:
-    - cron: "0 14 */14 * *"  # every 14 days at 14:00 UTC
-  workflow_dispatch:          # allow manual runs
+    - cron: "0 14 */14 * *"  # runs every 14 days at 14:00 UTC
+  workflow_dispatch:          # allows manual trigger
 
 jobs:
   run-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies and Playwright browsers
+      - name: Install dependencies & Playwright browsers
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -29,10 +29,9 @@ jobs:
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        run: |
-          python test_contact_form.py
+        run: python test_contact_form.py
 
-      - name: Upload artifacts (logs, screenshots, HTML)
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v3
         with:
           name: form-test-results
@@ -40,4 +39,3 @@ jobs:
             form_test_log.txt
             form_test_screenshot.png
             form_test_source.html
-
