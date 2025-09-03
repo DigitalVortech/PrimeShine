@@ -1,0 +1,8 @@
+- name: Upload artifacts (logs, screenshots, HTML)
+  uses: actions/upload-artifact@v3
+  with:
+    name: form-test-results
+    path: |
+      form_test_log.txt
+      form_test_screenshot.png
+      form_test_source.html
