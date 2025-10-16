@@ -2,8 +2,8 @@ name: Contact Form Biweekly Test
 
 on:
   schedule:
-    - cron: "0 14 1,15 * *"   # (more reliable than */14) runs on the 1st & 15th
-  workflow_dispatch:
+    - cron: "0 14 1,15 * *"   # runs on the 1st & 15th at 14:00 UTC
+  workflow_dispatch:          # allows manual trigger
 
 jobs:
   run-test:
@@ -26,13 +26,19 @@ jobs:
 
       - name: Run contact form test
         env:
-          TEST_URL: ${{ secrets.TEST_URL }}                # <-- add this
-          SUCCESS_SELECTOR: ${{ secrets.SUCCESS_SELECTOR }}# <-- and this
-          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}            # optional
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}          # optional
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}              # optional
-          SMTP_USER: ${{ secrets.SMTP_USER }}              # optional
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}      # optional
+          TEST_URL: ${{ secrets.TEST_URL }}
+          SUCCESS_SELECTOR: ${{ secrets.SUCCESS_SELECTOR }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          # Elementor field selectors
+          SEL_NAME: '#form-field-name'
+          SEL_EMAIL: '#form-field-email'
+          SEL_PHONE: '#form-field-phone'
+          SEL_MESSAGE: '#form-field-message'
+          SEL_SUBMIT: '.elementor-form button[type="submit"]'
         run: python test_contact_form.py
 
       - name: Upload test artifacts
