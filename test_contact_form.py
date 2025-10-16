@@ -19,6 +19,7 @@ TEST_EMAIL = os.getenv("TEST_EMAIL", "qa@example.com")
 FORM_NAME = os.getenv("FORM_NAME", "QA Test")
 FORM_PHONE = os.getenv("FORM_PHONE", "555-000-1234")
 FORM_MESSAGE = os.getenv("FORM_MESSAGE", f"Automated test {int(time.time())}")
+SUCCESS_TEXT = os.getenv("SUCCESS_TEXT", "thank")  # case-insensitive
 
 # Field selectors (Elementor + fallbacks)
 SEL_NAME = os.getenv("SEL_NAME", 'input[id^="form-field-name"], input[name*="name" i], input[autocomplete="name"]')
@@ -27,25 +28,12 @@ SEL_PHONE = os.getenv("SEL_PHONE", '#form-field-phone, input[name*="phone" i], i
 SEL_MESSAGE = os.getenv("SEL_MESSAGE", '#form-field-message, textarea[name*="message" i]')
 SEL_SUBMIT = os.getenv("SEL_SUBMIT", '.elementor-form button[type="submit"], button[type="submit"], input[type="submit"]')
 
-# Success / error heuristics
-SUCCESS_ANY = (
-    ".elementor-message-success, "
-    ".wpforms-confirmation-container, "
-    ".gform_confirmation_message, "
-    ".wpcf7 form.sent .wpcf7-response-output, "
-    "[role='alert']:has-text('Thank'), "
-    "text=/Thank/i"
-)
-ERROR_ANY = (
-    ".elementor-message-danger, "
-    ".wpforms-error-container, "
-    ".wpcf7 form.invalid .wpcf7-response-output, "
-    "[role='alert']:has-text('error')"
-)
+# Known success/error containers (CSS-only)
+SUCCESS_BOXES = ".elementor-message-success, .wpforms-confirmation-container, .gform_confirmation_message, .wpcf7 form.sent .wpcf7-response-output"
+ERROR_BOXES = ".elementor-message-danger, .wpforms-error-container, .wpcf7 form.invalid .wpcf7-response-output, .gform_validation_errors"
 
 def main():
     from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
-
     t0 = time.time()
     log("=== Contact form test started ===")
     log(f"URL: {TEST_URL}")
@@ -80,37 +68,59 @@ def main():
                 log(f"Submit button not found: {SEL_SUBMIT}")
                 raise
 
-            # Wait for a success condition:
-            # 1) redirect containing "thank"
-            # 2) visible success box (Elementor/WPForms/CF7)
-            # 3) page shows any text containing "Thank"
-            passed = False
+            # Give the form a moment to process network calls
             try:
                 page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 pass
 
-            # Check URL redirect first
+            passed = False
+
+            # 1) URL contains success text (e.g., thank-you page)
             try:
-                page.wait_for_url(re.compile(r"thank", re.I), timeout=5000)
-                log("Success: URL contains 'thank'.")
+                page.wait_for_url(re.compile(SUCCESS_TEXT, re.I), timeout=5000)
+                log(f"Success: URL contains '{SUCCESS_TEXT}'.")
                 passed = True
             except PwTimeout:
-                # No redirect; check DOM signals
+                log("No success redirect; checking DOM...")
+
+            # 2) Known success containers (pure CSS)
+            if not passed:
                 try:
-                    # Any known success containers OR any visible text with Thank
-                    page.locator(SUCCESS_ANY).first.wait_for(timeout=15000, state="visible")
-                    log("Success: Found a visible success message.")
+                    page.locator(SUCCESS_BOXES).first.wait_for(timeout=10000, state="visible")
+                    log("Success: Found a known success container.")
                     passed = True
                 except PwTimeout:
-                    # Check for explicit error container
-                    try:
-                        page.locator(ERROR_ANY).first.wait_for(timeout=1000, state="visible")
-                        log("Detected an error message after submit.")
-                    except PwTimeout:
-                        log("Did not detect success or explicit error within timeout.")
+                    log("Known success containers not found.")
 
-            # Save artifacts
+            # 3) ARIA alert containing success text
+            if not passed:
+                try:
+                    loc = page.get_by_role("alert").filter(has_text=re.compile(SUCCESS_TEXT, re.I))
+                    loc.first.wait_for(timeout=5000, state="visible")
+                    log("Success: Found an ARIA alert with success text.")
+                    passed = True
+                except PwTimeout:
+                    log("No ARIA alert with success text.")
+
+            # 4) Any visible text that contains success text
+            if not passed:
+                try:
+                    page.get_by_text(re.compile(SUCCESS_TEXT, re.I)).first.wait_for(timeout=5000, state="visible")
+                    log("Success: Found generic success text on page.")
+                    passed = True
+                except PwTimeout:
+                    log("No generic success text found.")
+
+            # If still not passed, look for explicit error containers to help debugging
+            if not passed:
+                try:
+                    page.locator(ERROR_BOXES).first.wait_for(timeout=1000, state="visible")
+                    log("Detected an error message after submit (validation/spam).")
+                except PwTimeout:
+                    log("No explicit error container detected.")
+
+            # Save artifacts either way
             try:
                 page.screenshot(path="form_test_screenshot.png", full_page=True)
                 Path("form_test_source.html").write_text(page.content(), encoding="utf-8")
@@ -137,7 +147,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-
 
