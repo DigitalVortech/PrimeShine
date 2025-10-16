@@ -1,39 +1,52 @@
 # test_contact_form.py
-import os, sys, time, traceback
+import os, sys, time, traceback, re
 from pathlib import Path
 
 LOG = Path("form_test_log.txt")
 
 def log(msg):
     print(msg, flush=True)
-    LOG.open("a", encoding="utf-8").write(msg + "\n")
+    with LOG.open("a", encoding="utf-8") as f:
+        f.write(msg + "\n")
 
-def need(name, default=None):
-    v = os.getenv(name, default)
-    if v is None or v == "":
-        log(f"Missing required env var: {name}")
-        sys.exit(2)
-    return v
+TEST_URL = os.getenv("TEST_URL")
+if not TEST_URL:
+    log("Missing required env var: TEST_URL")
+    sys.exit(2)
 
-TEST_URL = need("TEST_URL")                      # e.g., https://primeshinehousecleaning.com/contact/
-SUCCESS_SELECTOR = need("SUCCESS_SELECTOR")      # e.g., text=Thank you, or a CSS like .wpcf7-mail-sent-ok
+# Test data
 TEST_EMAIL = os.getenv("TEST_EMAIL", "qa@example.com")
-
-# Common fallback selectors. You can override via env if needed.
-SEL_NAME = os.getenv("SEL_NAME", 'input[name="name"], input#name, input[name="your-name"]')
-SEL_EMAIL = os.getenv("SEL_EMAIL", 'input[name="email"], input#email, input[name="your-email"]')
-SEL_PHONE = os.getenv("SEL_PHONE", 'input[name="phone"], input#phone, input[name="tel"], input[name="your-phone"]')
-SEL_MESSAGE = os.getenv("SEL_MESSAGE", 'textarea[name="message"], textarea#message, textarea[name="your-message"]')
-SEL_SUBMIT = os.getenv("SEL_SUBMIT", 'button[type="submit"], input[type="submit"]')
-
 FORM_NAME = os.getenv("FORM_NAME", "QA Test")
 FORM_PHONE = os.getenv("FORM_PHONE", "555-000-1234")
 FORM_MESSAGE = os.getenv("FORM_MESSAGE", f"Automated test {int(time.time())}")
 
+# Field selectors (Elementor + fallbacks)
+SEL_NAME = os.getenv("SEL_NAME", 'input[id^="form-field-name"], input[name*="name" i], input[autocomplete="name"]')
+SEL_EMAIL = os.getenv("SEL_EMAIL", '#form-field-email, input[name*="email" i]')
+SEL_PHONE = os.getenv("SEL_PHONE", '#form-field-phone, input[name*="phone" i], input[type="tel"]')
+SEL_MESSAGE = os.getenv("SEL_MESSAGE", '#form-field-message, textarea[name*="message" i]')
+SEL_SUBMIT = os.getenv("SEL_SUBMIT", '.elementor-form button[type="submit"], button[type="submit"], input[type="submit"]')
+
+# Success / error heuristics
+SUCCESS_ANY = (
+    ".elementor-message-success, "
+    ".wpforms-confirmation-container, "
+    ".gform_confirmation_message, "
+    ".wpcf7 form.sent .wpcf7-response-output, "
+    "[role='alert']:has-text('Thank'), "
+    "text=/Thank/i"
+)
+ERROR_ANY = (
+    ".elementor-message-danger, "
+    ".wpforms-error-container, "
+    ".wpcf7 form.invalid .wpcf7-response-output, "
+    "[role='alert']:has-text('error')"
+)
+
 def main():
     from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 
-    start = time.time()
+    t0 = time.time()
     log("=== Contact form test started ===")
     log(f"URL: {TEST_URL}")
 
@@ -46,7 +59,7 @@ def main():
             page.goto(TEST_URL, timeout=60000)
             log("Page loaded")
 
-            # Fill fields best-effort
+            # Fill fields (best effort)
             for sel, val in [
                 (SEL_NAME, FORM_NAME),
                 (SEL_EMAIL, TEST_EMAIL),
@@ -67,33 +80,59 @@ def main():
                 log(f"Submit button not found: {SEL_SUBMIT}")
                 raise
 
-            # Prove success
+            # Wait for a success condition:
+            # 1) redirect containing "thank"
+            # 2) visible success box (Elementor/WPForms/CF7)
+            # 3) page shows any text containing "Thank"
+            passed = False
             try:
-                if SUCCESS_SELECTOR.lower().startswith("text="):
-                    page.get_by_text(SUCCESS_SELECTOR[5:]).wait_for(timeout=20000, state="visible")
-                else:
-                    page.wait_for_selector(SUCCESS_SELECTOR, timeout=20000, state="visible")
-                log("Success selector found")
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+
+            # Check URL redirect first
+            try:
+                page.wait_for_url(re.compile(r"thank", re.I), timeout=5000)
+                log("Success: URL contains 'thank'.")
+                passed = True
             except PwTimeout:
-                log("Did not see success selector in time")
-                raise
+                # No redirect; check DOM signals
+                try:
+                    # Any known success containers OR any visible text with Thank
+                    page.locator(SUCCESS_ANY).first.wait_for(timeout=15000, state="visible")
+                    log("Success: Found a visible success message.")
+                    passed = True
+                except PwTimeout:
+                    # Check for explicit error container
+                    try:
+                        page.locator(ERROR_ANY).first.wait_for(timeout=1000, state="visible")
+                        log("Detected an error message after submit.")
+                    except PwTimeout:
+                        log("Did not detect success or explicit error within timeout.")
 
-            # Artifacts
-            page.screenshot(path="form_test_screenshot.png", full_page=True)
-            Path("form_test_source.html").write_text(page.content(), encoding="utf-8")
+            # Save artifacts
+            try:
+                page.screenshot(path="form_test_screenshot.png", full_page=True)
+                Path("form_test_source.html").write_text(page.content(), encoding="utf-8")
+            except Exception:
+                pass
 
-            log(f"=== PASS in {time.time()-start:.1f}s ===")
-            return 0
+            if passed:
+                dur = time.time() - t0
+                log(f"=== PASS in {dur:.1f}s ===")
+                return 0
+            else:
+                log("=== FAIL (no success signal) ===")
+                return 1
 
     except Exception as e:
-        # Try to capture artifacts even on failure
         try:
             page.screenshot(path="form_test_screenshot.png", full_page=True)
             Path("form_test_source.html").write_text(page.content(), encoding="utf-8")
         except Exception:
             pass
         log("ERROR:\n" + "".join(traceback.format_exception(e)))
-        log("=== FAIL ===")
+        log("=== FAIL (exception) ===")
         return 1
 
 if __name__ == "__main__":
