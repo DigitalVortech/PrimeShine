@@ -96,6 +96,8 @@ def main():
             try:
                 page.locator(SEL_SUBMIT).first.scroll_into_view_if_needed(timeout=3000)
                 page.click(SEL_SUBMIT, timeout=10000)
+                page.wait_for_timeout(1500)  # small 1.5s pause so Elementor registers the fill
+
                 log("Clicked submit")
             except PwTimeout:
                 log(f"Submit button not found: {SEL_SUBMIT}")
