@@ -3,7 +3,7 @@ name: Contact Form Biweekly Test
 on:
   schedule:
     - cron: "0 14 1,15 * *"   # runs on the 1st & 15th at 14:00 UTC
-  workflow_dispatch:          # allows manual trigger
+  workflow_dispatch:
 
 jobs:
   run-test:
@@ -26,19 +26,25 @@ jobs:
 
       - name: Run contact form test
         env:
-          TEST_URL: ${{ secrets.TEST_URL }}
-          SUCCESS_SELECTOR: ${{ secrets.SUCCESS_SELECTOR }}
+          # Required
+          TEST_URL: ${{ secrets.TEST_URL }}            # e.g. https://primeshinehousecleaning.com/contact/
+          SUCCESS_SELECTOR: 'text=Thank'               # broad text match for success message
+
+          # Optional test data
           TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+
+          # Elementor-friendly selectors (broader matches)
+          SEL_NAME: 'input[id^="form-field-name"], input[name*="name" i], input[autocomplete="name"]'
+          SEL_EMAIL: '#form-field-email, input[name*="email" i]'
+          SEL_PHONE: '#form-field-phone, input[name*="phone" i], input[type="tel"]'
+          SEL_MESSAGE: '#form-field-message, textarea[name*="message" i]'
+          SEL_SUBMIT: '.elementor-form button[type="submit"], button[type="submit"], input[type="submit"]'
+
+          # Optional mailer creds if your script sends alerts
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          # Elementor field selectors
-          SEL_NAME: '#form-field-name'
-          SEL_EMAIL: '#form-field-email'
-          SEL_PHONE: '#form-field-phone'
-          SEL_MESSAGE: '#form-field-message'
-          SEL_SUBMIT: '.elementor-form button[type="submit"]'
         run: python test_contact_form.py
 
       - name: Upload test artifacts
